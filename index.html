@@ -394,6 +394,7 @@ td .mono{font-family:var(--font-m);font-size:11px;color:var(--grey)}
       <input type="text" id="fIndustry" placeholder="Industry (e.g. Tattoo Studio)">
       <input type="text" id="fCity" placeholder="City (e.g. Sydney)">
       <input type="text" id="fLocality" placeholder="Suburb / Locality">
+      <input type="text" id="fCountry" placeholder="Country (e.g. Australia)">
       <select id="fHasEmail">
         <option value="">Any contact status</option>
         <option value="yes">Has email</option>
@@ -401,7 +402,9 @@ td .mono{font-family:var(--font-m);font-size:11px;color:var(--grey)}
       </select>
       <button id="leadsSearchBtn">Search</button>
       <button class="clear" id="leadsClearBtn">Clear</button>
+      <button id="leadsDiscoverBtn">Search new leads</button>
     </div>
+    <p id="discoverStatus" style="color:var(--grey);font-size:12.5px;margin-top:6px"></p>
     <div id="leadsCount">LOADING…</div>
     <div class="card tablecard">
       <div class="tbl-wrap">
@@ -736,6 +739,47 @@ function esc(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+/* Discovery — calls the Render API to find new leads, then refreshes the table */
+/* Discovery — calls the Render API to find new leads, then refreshes the table */
+async function discoverNewLeads(){
+  const industry = document.getElementById('fIndustry').value.trim();
+  const city = document.getElementById('fCity').value.trim();
+  const country = document.getElementById('fCountry').value.trim();
+  const statusEl = document.getElementById('discoverStatus');
+  const btn = document.getElementById('leadsDiscoverBtn');
+
+  if(!industry || !city || !country){
+    statusEl.textContent = 'Enter an industry, city, and country above first.';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = 'Searching… (first request can take up to a minute)';
+
+  try{
+    const res = await fetch('https://flowstackone-lead-engine.onrender.com/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ industry, city, country })
+    });
+
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+
+    const result = await res.json();
+    statusEl.textContent = `Found ${result.discovered}. ${result.inserted} new, ${result.updated} updated.`;
+    document.getElementById('fLocality').value = '';
+    document.getElementById('fHasEmail').value = '';
+    await loadLeads();
+
+  } catch(err){
+    statusEl.textContent = 'Search failed — please try again.';
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('leadsDiscoverBtn').addEventListener('click', discoverNewLeads);
 document.getElementById('leadsSearchBtn').addEventListener('click', loadLeads);
 document.getElementById('leadsClearBtn').addEventListener('click', ()=>{
   document.getElementById('fIndustry').value='';
