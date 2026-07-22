@@ -251,6 +251,15 @@ td .mono{font-family:var(--font-m);font-size:11px;color:var(--grey)}
 #leadsCount{font-family:var(--font-m);font-size:10px;color:var(--grey);letter-spacing:.1em;margin-bottom:10px}
 #leadsBody a{color:var(--paper);text-decoration:underline;text-decoration-color:var(--line-strong)}
 #leadsBody td{white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+#leadsBody select,#leadsBody input{
+  background:var(--carbon-2);border:1px solid var(--line-strong);color:var(--paper);
+  padding:5px 7px;font-family:var(--font-d);font-size:12px;
+}
+#leadsBody .logCallBtn{
+  background:none;border:1px solid var(--line-strong);color:var(--grey);
+  padding:3px 8px;font-family:var(--font-m);font-size:9.5px;letter-spacing:.08em;margin-left:6px;
+}
+#leadsBody .logCallBtn:hover{color:var(--paper);border-color:var(--paper)}
 </style>
 </head>
 <body>
@@ -719,6 +728,8 @@ async function loadLeads(){
   const city=document.getElementById('fCity').value.trim();
   const locality=document.getElementById('fLocality').value.trim();
   const hasEmail=document.getElementById('fHasEmail').value;
+  const status=document.getElementById('fStatus').value;
+  const overdue=document.getElementById('fOverdue').value;
 
   let q = sb.from('leads').select('*').order('business_name');
   if(industry) q = q.ilike('industry', `%${industry}%`);
@@ -726,6 +737,9 @@ async function loadLeads(){
   if(locality) q = q.ilike('locality', `%${locality}%`);
   if(hasEmail==='yes') q = q.not('email','is',null);
   if(hasEmail==='no') q = q.is('email',null);
+  if(status) q = q.eq('status', status);
+  if(overdue==='overdue') q = q.lt('next_followup_date', todayStr());
+  if(overdue==='today') q = q.eq('next_followup_date', todayStr());
 
   document.getElementById('leadsCount').textContent='LOADING…';
   const {data, error} = await q.limit(500);
@@ -739,7 +753,9 @@ async function loadLeads(){
 
 function renderLeadsTable(rows){
   document.getElementById('leadsCount').textContent = rows.length + ' LEADS';
-  document.getElementById('leadsBody').innerHTML = rows.map(r=>`<tr>
+  document.getElementById('leadsBody').innerHTML = rows.map(r=>{
+    const overdue = r.next_followup_date && r.next_followup_date < todayStr() && r.status !== 'won' && r.status !== 'lost';
+    return `<tr${overdue ? ' style="border-left:3px solid var(--missed)"' : ''}>
     <td><b>${esc(r.business_name)}</b></td>
     <td>${esc(r.industry)}</td>
     <td>${esc(r.locality)}</td>
@@ -750,8 +766,48 @@ function renderLeadsTable(rows){
     <td>${r.instagram?`<a href="${esc(r.instagram)}" target="_blank" rel="noopener">IG</a>`:''}</td>
     <td class="mono">${r.rating??''}</td>
     <td class="mono">${r.reviews??''}</td>
-  </tr>`).join('') || `<tr><td colspan="10" style="color:var(--grey)">No leads match these filters.</td></tr>`;
+    <td><select class="leadStatus" data-id="${r.id}">
+      ${['lead','contacted','demo','trial','negotiation','won','lost'].map(s=>`<option value="${s}"${r.status===s?' selected':''}>${s.toUpperCase()}</option>`).join('')}
+    </select></td>
+    <td class="mono">${r.contact_attempts ?? 0} <button class="logCallBtn" data-id="${r.id}" data-attempts="${r.contact_attempts ?? 0}">Log Call</button></td>
+    <td class="mono">${r.last_contact_date ?? ''}</td>
+    <td><input type="date" class="followupInput" data-id="${r.id}" value="${r.next_followup_date ?? ''}"></td>
+    <td><input type="text" class="notesInput" data-id="${r.id}" value="${esc(r.contact_notes ?? '')}" placeholder="Notes"></td>
+  </tr>`;
+  }).join('') || `<tr><td colspan="15" style="color:var(--grey)">No leads match these filters.</td></tr>`;
 }
+
+function todayStr(){
+  return new Date().toISOString().slice(0,10);
+}
+
+async function updateLead(id, fields){
+  const {error} = await sb.from('leads').update(fields).eq('id', id);
+  if(error){
+    alert('Update failed: ' + error.message);
+    console.error(error);
+  }
+}
+
+document.getElementById('leadsBody').addEventListener('change', e=>{
+  const id = e.target.dataset.id;
+  if(!id) return;
+  if(e.target.classList.contains('leadStatus')){
+    updateLead(id, {status: e.target.value});
+  } else if(e.target.classList.contains('followupInput')){
+    updateLead(id, {next_followup_date: e.target.value || null});
+  } else if(e.target.classList.contains('notesInput')){
+    updateLead(id, {contact_notes: e.target.value});
+  }
+});
+
+document.getElementById('leadsBody').addEventListener('click', e=>{
+  const btn = e.target.closest('.logCallBtn');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  const newCount = parseInt(btn.dataset.attempts, 10) + 1;
+  updateLead(id, {contact_attempts: newCount, last_contact_date: todayStr()}).then(()=>loadLeads());
+});
 
 function esc(s){
   if(s==null) return '';
@@ -764,7 +820,7 @@ function exportLeadsToCSV(){
     return;
   }
 
-  const columns = ['business_name','industry','locality','city','phone','email','website','instagram','rating','reviews'];
+  const columns = ['business_name','industry','locality','city','phone','email','website','instagram','rating','reviews','status','contact_attempts','last_contact_date','next_followup_date','contact_notes'];
   const header = columns.join(',');
 
   const rows = currentLeads.map(lead =>
@@ -836,6 +892,8 @@ document.getElementById('leadsClearBtn').addEventListener('click', ()=>{
   document.getElementById('fCity').value='';
   document.getElementById('fLocality').value='';
   document.getElementById('fHasEmail').value='';
+  document.getElementById('fStatus').value='';
+  document.getElementById('fOverdue').value='';
   loadLeads();
 });
 </script>
